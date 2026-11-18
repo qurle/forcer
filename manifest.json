@@ -1,13 +1,19 @@
 {
   "name": "Forcer",
-  "id": "<000000000000000000>",
+  "id": "1704921228015407776",
   "api": "1.0.0",
   "main": "dist/code/code.js",
   "ui": "dist/ui/index.html",
-  "editorType": ["figma"],
-  "permissions": ["teamlibrary"],
+  "editorType": [
+    "figma"
+  ],
+  "permissions": [
+    "teamlibrary"
+  ],
   "documentAccess": "dynamic-page",
   "networkAccess": {
-    "allowedDomains": ["none"]
+    "allowedDomains": [
+      "none"
+    ]
   }
 }
