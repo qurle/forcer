@@ -44,7 +44,4 @@ Main-thread logic can be tested without installing the plugin, through the Figma
 
 ## Skills
 
-Project skills live in `.claude/skills/<name>/SKILL.md` and load automatically at session start.
-
-- `impecable`, `better-ui`: stubs. Paste the real skill content into their `SKILL.md` (plus any referenced files in the same folder).
-- `unslop`: already available through the claude.ai account as `anthropic-skills:unslop`. No copy needed here.
+Project skills go in `.claude/skills/<name>/SKILL.md` and load automatically at session start. `unslop` is available through the claude.ai account as `anthropic-skills:unslop`.
