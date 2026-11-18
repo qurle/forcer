@@ -15,12 +15,26 @@ export const app = $state({
 	prefs: { lastCollection: {} } as Prefs,
 	/** Field the picker is open for */
 	picker: null as FieldState | null,
-	/** Human context for the picker title, e.g. "Padding · Top" */
-	pickerContext: '',
+	/** Input the picker popover is anchored to */
+	anchor: null as HTMLElement | null,
 	busy: false,
 	/** Collapsed state per group id, kept across selection changes */
-	collapsed: { more: true } as Record<string, boolean>,
+	collapsed: {} as Record<string, boolean>,
+	/** Expanded extra fields (min/max, corners, sides, paddings), keyed by the first hidden field */
+	expanded: {} as Record<string, boolean>,
 })
+
+export function openPicker(field: FieldState, anchor: HTMLElement) {
+	app.picker = field
+	app.anchor = anchor
+}
+
+export function closePicker() {
+	const anchor = app.anchor
+	app.picker = null
+	app.anchor = null
+	if (anchor?.isConnected) anchor.focus({ preventScroll: true })
+}
 
 export function post(msg: ToCode) {
 	parent.postMessage({ pluginMessage: msg }, '*')
@@ -38,7 +52,10 @@ window.addEventListener('message', event => {
 		case 'selection':
 			app.selection = msg.data
 			// Keep the picker pointed at the same field, close it if the field is gone
-			if (app.picker) app.picker = findField(msg.data, app.picker.key)
+			if (app.picker) {
+				app.picker = findField(msg.data, app.picker.key)
+				if (!app.picker) app.anchor = null
+			}
 			break
 		case 'collections':
 			app.collections = msg.items

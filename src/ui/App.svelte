@@ -4,6 +4,7 @@
 	import Group from './components/Group.svelte'
 	import Icon from './components/Icon.svelte'
 	import Picker from './components/Picker.svelte'
+	import Resizer from './components/Resizer.svelte'
 
 	onMount(() => post({ type: 'ready' }))
 
@@ -20,20 +21,23 @@
 		</div>
 	{:else}
 		<header>
-			<div class="titles">
-				<span class="title">{sel.title}</span>
+			<div class="head">
+				<span class="title ellipsis" title={sel.title}>{sel.title}</span>
 				<span class="subtitle">{sel.subtitle}</span>
 			</div>
 			{#if sel.instance}
-				<span class="instance" title="Bindings on instance layers are overrides">
-					<Icon name="instance" size={12} /> Overriding the instance
-				</span>
+				<p class="banner" title="Variables bound inside an instance are stored as overrides">
+					<span class="banner-icon"><Icon name="instance" /></span>
+					Bindings override the instance
+				</p>
+			{/if}
+			{#if sel.readLimit}
+				<p class="banner">
+					<span class="banner-icon"><Icon name="info" /></span>
+					Values from the first {sel.readLimit} of {sel.count} layers. Bindings apply to all.
+				</p>
 			{/if}
 		</header>
-
-		{#if sel.readLimit}
-			<p class="limit">Values from the first {sel.readLimit} of {sel.count} layers. Bindings apply to all.</p>
-		{/if}
 
 		<div class="groups">
 			{#each sel.groups as group (group.id)}
@@ -44,16 +48,20 @@
 		</div>
 	{/if}
 
-	{#if app.picker}
-		<Picker field={app.picker} />
+	{#if app.picker && app.anchor}
+		<Picker field={app.picker} anchor={app.anchor} />
 	{/if}
+
+	<Resizer />
 </main>
 
 <style>
+	/* The whole panel scrolls, header included */
 	main {
 		height: 100%;
 		display: flex;
 		flex-direction: column;
+		overflow-y: auto;
 	}
 
 	main.busy {
@@ -61,54 +69,63 @@
 	}
 
 	header {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		padding: 12px var(--gutter);
-		border-bottom: 1px solid var(--border);
 		flex: none;
+		border-bottom: 1px solid var(--border);
 	}
 
-	.titles {
+	/* Mirrors Figma's "Frame" header: 13px semibold title */
+	.head {
 		display: flex;
 		align-items: baseline;
-		gap: 6px;
+		gap: 8px;
 		min-width: 0;
+		padding: 13px 8px 13px 16px;
 	}
 
 	.title {
+		font-size: 13px;
 		font-weight: 550;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		line-height: 22px;
+		letter-spacing: -0.0025em;
 	}
 
 	.subtitle {
+		flex: none;
 		color: var(--text-secondary);
-		white-space: nowrap;
 	}
 
-	.instance {
-		align-self: flex-start;
-		display: inline-flex;
+	.banner {
+		display: flex;
+		align-items: flex-start;
+		margin: -4px 8px 12px 16px;
+		padding: 4px 8px 4px 0;
+		border-radius: var(--radius);
+		background: var(--bg-secondary);
+		color: var(--text-secondary);
+	}
+
+	.banner + .banner {
+		margin-top: -4px;
+	}
+
+	/* 24px icon slot aligned to the first 16px text line */
+	.banner-icon {
+		width: var(--control);
+		height: 16px;
+		display: flex;
 		align-items: center;
-		gap: 4px;
-		height: 20px;
-		padding: 0 6px;
-		border-radius: 4px;
-		background: var(--bg-component);
-		color: var(--text-component);
+		justify-content: center;
+		flex: none;
+		color: var(--icon-secondary);
 	}
 
-	.limit {
-		padding: 8px var(--gutter);
-		color: var(--text-secondary);
-		border-bottom: 1px solid var(--border);
+	.banner-icon :global(svg) {
+		margin: -4px 0;
 	}
 
 	.groups {
-		flex: 1;
-		overflow-y: auto;
+		/* Room for the resizer below the last row */
+		padding-bottom: 16px;
 	}
 
 	.empty {

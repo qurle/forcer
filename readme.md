@@ -9,9 +9,11 @@ The design system team publishes kit-only variables with empty scopes, so they s
 ## How to use
 
 1. Select one or more layers.
-2. Open a field (Size, Auto layout, Corner radius, Fill, Stroke, Effects, More) and click its value.
+2. Click a field in Size, Layout, Appearance, Fill, Stroke, Effects or Layout guide. The variable picker opens right under it.
 3. Pick a collection, search, click a variable. Out-of-scope variables are listed first.
-4. Use the detach icon to unbind a variable (the current value is kept), or to detach a style.
+4. Hover a bound field and click the detach icon to unbind it (the current value is kept). Styles have their own detach button.
+
+Fields follow Figma's properties panel: inputs are prefixed with a letter or icon instead of a label. The chevron next to a row reveals more: min and max sizes, individual paddings, corners and stroke sides. Drag the corner of the window to resize it (double-click to reset); the size is remembered.
 
 Bindings apply to the whole selection as a single undo step.
 
@@ -20,12 +22,12 @@ Bindings apply to the whole selection as a single undo step.
 | Group | Fields |
 |---|---|
 | Size | width, height, min/max width and height (auto layout or its children) |
-| Auto layout | gap, wrap gap, grid row/column gap, padding per side |
-| Corner radius | all corners, each corner |
+| Layout | gap, wrap gap, grid row/column gap, horizontal and vertical padding, padding per side |
+| Appearance | opacity, visibility, corner radius (all corners or each corner) |
 | Fill | solid color, gradient stop colors |
 | Stroke | solid color, gradient stop colors, weight (all sides or each side) |
 | Effects | shadow X, Y, blur, spread, color; layer/background blur radius |
-| More | opacity, visibility, layout grid count/size/gutter/offset |
+| Layout guide | layout grid count/size/gutter/offset |
 
 Not bindable through the API: corner smoothing, progressive blur start radius and offsets, image/video/pattern paints, noise/texture/glass effects.
 

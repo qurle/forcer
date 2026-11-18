@@ -5,8 +5,21 @@ import { applyBinding, detachStyle, type ApplyResult } from './apply'
 import { load, save } from './storage'
 
 const K_PREFS = 'forcer:prefs:v1'
+const K_SIZE = 'forcer:size:v1'
 
-figma.showUI(__html__, { themeColors: true, width: 300, height: 600 })
+// Window size: resizable from the corner dragger, remembered between launches
+const SIZE = { width: 280, height: 560, minWidth: 240, minHeight: 240, maxWidth: 800, maxHeight: 1400 }
+const clampSize = (w: number, h: number) => ({
+	width: Math.round(Math.min(SIZE.maxWidth, Math.max(SIZE.minWidth, w || SIZE.width))),
+	height: Math.round(Math.min(SIZE.maxHeight, Math.max(SIZE.minHeight, h || SIZE.height))),
+})
+
+figma.showUI(__html__, { themeColors: true, width: SIZE.width, height: SIZE.height })
+load<{ width: number; height: number }>(K_SIZE).then(saved => {
+	if (!saved) return
+	const { width, height } = clampSize(saved.width, saved.height)
+	if (width !== SIZE.width || height !== SIZE.height) figma.ui.resize(width, height)
+})
 
 const post = (msg: ToUI) => figma.ui.postMessage(msg)
 
@@ -89,6 +102,16 @@ figma.ui.onmessage = async (msg: ToCode) => {
 			break
 		case 'save-prefs':
 			save(K_PREFS, msg.prefs)
+			break
+		case 'resize': {
+			const { width, height } = clampSize(msg.width, msg.height)
+			figma.ui.resize(width, height)
+			if (msg.save) save(K_SIZE, { width, height })
+			break
+		}
+		case 'reset-size':
+			figma.ui.resize(SIZE.width, SIZE.height)
+			save(K_SIZE, null)
 			break
 		case 'bind':
 			await busy(async () => {

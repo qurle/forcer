@@ -1,5 +1,5 @@
 // Selection analysis: which fields can be bound on all selected layers, with current values
-import type { Display, FieldState, GroupState, Section, SelectionInfo, StyleInfo, StyleKind, VarRef, VarType } from '../shared/types'
+import type { Display, FieldState, Glyph, GroupState, Prefix, Section, SelectionInfo, StyleInfo, StyleKind, VarRef, VarType } from '../shared/types'
 import { type Addr, type Bound, MIXED, encode, isFrameLike, readField, requiredType, effectSupports, gridSupports } from './fields'
 import { getCollection } from './catalog'
 
@@ -52,10 +52,12 @@ export async function analyze(): Promise<SelectionInfo> {
 	const all = figma.currentPage.selection
 	if (!all.length) return { count: 0, title: '', subtitle: '', instance: false, readLimit: null, groups: [] }
 	const nodes = all.slice(0, READ_LIMIT)
-	const raw: { id: string; label: string; styles?: StyleInfo[]; notice?: string; sections: { title?: string; note?: string; fields: RawField[] }[] }[] = []
+	type RawSection = Omit<Section, 'fields'> & { fields: RawField[] }
+	const raw: { id: string; label: string; styles?: StyleInfo[]; notice?: string; sections: RawSection[] }[] = []
 
 	/** Builds a field if it applies to every read node, aggregating value and binding */
-	const field = (addr: Addr, label: string, scopeReq: Req, type: VarType = requiredType(addr)): RawField | null => {
+	const field = (addr: Addr, label: string, scopeReq: Req, prefix?: Prefix | Glyph, aside?: string): RawField | null => {
+		const type: VarType = requiredType(addr)
 		let value: Display | undefined
 		let valueKey = ''
 		let boundId: Bound | undefined
@@ -68,51 +70,67 @@ export async function analyze(): Promise<SelectionInfo> {
 			if (boundId === undefined) boundId = r.bound
 			else if (boundId !== r.bound) boundId = MIXED
 		}
-		return { key: encode(addr), label, type, scopeReq, value: value!, boundId: boundId ?? null }
+		const pre = typeof prefix === 'string' ? { icon: prefix } : prefix
+		return { key: encode(addr), label, prefix: pre, aside, type, scopeReq, value: value!, boundId: boundId ?? null }
 	}
 	const fields = (...list: (RawField | null)[]) => list.filter((f): f is RawField => !!f)
 	const every = (prop: string) => nodes.every(n => prop in n)
 
-	// --- Size
-	const size = fields(
-		field({ k: 'node', f: 'width' }, 'Width', R.size),
-		field({ k: 'node', f: 'height' }, 'Height', R.size),
-		field({ k: 'node', f: 'minWidth' }, 'Min width', R.size),
-		field({ k: 'node', f: 'maxWidth' }, 'Max width', R.size),
-		field({ k: 'node', f: 'minHeight' }, 'Min height', R.size),
-		field({ k: 'node', f: 'maxHeight' }, 'Max height', R.size),
-	)
-	if (size.length) raw.push({ id: 'size', label: 'Size', sections: [{ fields: size }] })
+	const T = (text: string): Prefix => ({ text })
 
-	// --- Auto layout
-	const gaps = fields(
-		field({ k: 'node', f: 'itemSpacing' }, 'Gap', R.gap),
-		field({ k: 'node', f: 'counterAxisSpacing' }, 'Wrap gap', R.gap),
-		field({ k: 'node', f: 'gridRowGap' }, 'Row gap', R.gap),
-		field({ k: 'node', f: 'gridColumnGap' }, 'Column gap', R.gap),
-	)
-	const padding = fields(
-		field({ k: 'node', f: 'paddingTop' }, 'Top', R.gap),
-		field({ k: 'node', f: 'paddingRight' }, 'Right', R.gap),
-		field({ k: 'node', f: 'paddingBottom' }, 'Bottom', R.gap),
-		field({ k: 'node', f: 'paddingLeft' }, 'Left', R.gap),
-	)
-	if (gaps.length || padding.length) {
-		const sections: { title?: string; fields: RawField[] }[] = []
-		if (gaps.length) sections.push({ fields: gaps })
-		if (padding.length) sections.push({ title: 'Padding', fields: padding })
-		raw.push({ id: 'layout', label: 'Auto layout', sections })
+	/** Leading fields stay visible, the rest hide behind a chevron. Falls back to showing all if a leading field is missing */
+	const expandable = (list: RawField[], lead: string[], more: string): RawSection => {
+		const shown = list.filter(f => lead.includes(f.key)).length
+		const ordered = [...list.filter(f => lead.includes(f.key)), ...list.filter(f => !lead.includes(f.key))]
+		return shown && shown < list.length ? { fields: ordered, shown, more } : { fields: list }
 	}
 
-	// --- Radius
-	const radius = fields(
-		field({ k: 'node', f: 'radiusAll' }, 'All corners', R.radius),
-		field({ k: 'node', f: 'topLeftRadius' }, 'Top left', R.radius),
-		field({ k: 'node', f: 'topRightRadius' }, 'Top right', R.radius),
-		field({ k: 'node', f: 'bottomRightRadius' }, 'Bottom right', R.radius),
-		field({ k: 'node', f: 'bottomLeftRadius' }, 'Bottom left', R.radius),
+	// --- Size: width and height, min/max on demand
+	// Ordered for a two-column grid: width-like fields on the left, height-like on the right
+	const size = fields(
+		field({ k: 'node', f: 'width' }, 'Width', R.size, T('W')),
+		field({ k: 'node', f: 'height' }, 'Height', R.size, T('H')),
+		field({ k: 'node', f: 'minWidth' }, 'Min width', R.size, 'min-w'),
+		field({ k: 'node', f: 'minHeight' }, 'Min height', R.size, 'min-h'),
+		field({ k: 'node', f: 'maxWidth' }, 'Max width', R.size, 'max-w'),
+		field({ k: 'node', f: 'maxHeight' }, 'Max height', R.size, 'max-h'),
 	)
-	if (radius.length) raw.push({ id: 'radius', label: 'Corner radius', sections: [{ fields: radius }] })
+	if (size.length) raw.push({ id: 'size', label: 'Size', sections: [expandable(size, ['node:width', 'node:height'], 'min and max size')] })
+
+	// --- Layout: gaps, padding pairs with individual sides on demand
+	const layout: RawSection[] = []
+	const gaps = fields(
+		field({ k: 'node', f: 'itemSpacing' }, 'Gap', R.gap, 'gap-h'),
+		field({ k: 'node', f: 'counterAxisSpacing' }, 'Wrap gap', R.gap, 'gap-v'),
+		field({ k: 'node', f: 'gridRowGap' }, 'Row gap', R.gap, 'gap-row'),
+		field({ k: 'node', f: 'gridColumnGap' }, 'Column gap', R.gap, 'gap-col'),
+	)
+	if (gaps.length) layout.push({ fields: gaps })
+	const padding = fields(
+		field({ k: 'node', f: 'paddingX' }, 'Horizontal padding', R.gap, 'pad-x'),
+		field({ k: 'node', f: 'paddingY' }, 'Vertical padding', R.gap, 'pad-y'),
+		field({ k: 'node', f: 'paddingLeft' }, 'Left padding', R.gap, 'pad-l'),
+		field({ k: 'node', f: 'paddingTop' }, 'Top padding', R.gap, 'pad-t'),
+		field({ k: 'node', f: 'paddingRight' }, 'Right padding', R.gap, 'pad-r'),
+		field({ k: 'node', f: 'paddingBottom' }, 'Bottom padding', R.gap, 'pad-b'),
+	)
+	if (padding.length) layout.push(expandable(padding, ['node:paddingX', 'node:paddingY'], 'individual padding'))
+	if (layout.length) raw.push({ id: 'layout', label: 'Layout', sections: layout })
+
+	// --- Appearance: opacity and corner radius in one row as in Figma, individual corners on demand, visibility
+	const appearance: RawSection[] = []
+	const look = fields(
+		field({ k: 'node', f: 'opacity' }, 'Opacity', R.opacity, 'opacity'),
+		field({ k: 'node', f: 'radiusAll' }, 'Corner radius', R.radius, 'radius'),
+		field({ k: 'node', f: 'topLeftRadius' }, 'Top left radius', R.radius, 'corner-tl'),
+		field({ k: 'node', f: 'topRightRadius' }, 'Top right radius', R.radius, 'corner-tr'),
+		field({ k: 'node', f: 'bottomLeftRadius' }, 'Bottom left radius', R.radius, 'corner-bl'),
+		field({ k: 'node', f: 'bottomRightRadius' }, 'Bottom right radius', R.radius, 'corner-br'),
+	)
+	if (look.length) appearance.push(expandable(look, ['node:opacity', 'node:radiusAll'], 'individual corners'))
+	const visible = fields(field({ k: 'node', f: 'visible' }, 'Visibility', R.none, 'eye'))
+	if (visible.length) appearance.push({ fields: visible })
+	if (appearance.length) raw.push({ id: 'appearance', label: 'Appearance', sections: appearance })
 
 	// --- Fill & stroke
 	for (const prop of ['fills', 'strokes'] as const) {
@@ -133,25 +151,33 @@ export async function analyze(): Promise<SelectionInfo> {
 		const paints = lists[0]
 		for (let i = paints.length - 1; i >= 0; i--) {
 			const p = paints[i]
-			const title = (PAINT_LABEL[p.type] ?? p.type) + (p.visible === false ? ' · hidden' : '')
-			if (p.type === 'SOLID') g.sections.push({ title, fields: fields(field({ k: 'paint', prop, i }, 'Color', req)) })
+			const dim = p.visible === false
+			const kind = PAINT_LABEL[p.type] ?? p.type
+			const what = isFill ? 'Fill' : 'Stroke'
+			if (p.type === 'SOLID') g.sections.push({ dim, fields: fields(field({ k: 'paint', prop, i }, `${what} color`, req)) })
 			else if ('gradientStops' in p)
 				g.sections.push({
-					title,
-					fields: fields(...p.gradientStops.map((s, j) => field({ k: 'paint', prop, i, stop: j }, `Stop ${Math.round(s.position * 100)}%`, req))),
+					title: kind,
+					dim,
+					fields: fields(
+						...p.gradientStops.map((s, j) => {
+							const pos = `${Math.round(s.position * 100)}%`
+							return field({ k: 'paint', prop, i, stop: j }, `${kind} stop ${pos}`, req, undefined, pos)
+						}),
+					),
 				})
-			else g.sections.push({ title, note: 'Can’t bind variables', fields: [] })
+			else g.sections.push({ title: kind, dim, note: 'Can’t bind variables', fields: [] })
 		}
 		if (!paints.length) g.sections.push({ note: isFill ? 'No fills' : 'No strokes', fields: [] })
 		if (!isFill && paints.length) {
 			const weight = fields(
-				field({ k: 'node', f: 'strokeWeightAll' }, 'All sides', R.strokeWeight),
-				field({ k: 'node', f: 'strokeTopWeight' }, 'Top', R.strokeWeight),
-				field({ k: 'node', f: 'strokeRightWeight' }, 'Right', R.strokeWeight),
-				field({ k: 'node', f: 'strokeBottomWeight' }, 'Bottom', R.strokeWeight),
-				field({ k: 'node', f: 'strokeLeftWeight' }, 'Left', R.strokeWeight),
+				field({ k: 'node', f: 'strokeWeightAll' }, 'Stroke weight', R.strokeWeight, 'stroke-weight'),
+				field({ k: 'node', f: 'strokeLeftWeight' }, 'Left stroke', R.strokeWeight, 'side-l'),
+				field({ k: 'node', f: 'strokeTopWeight' }, 'Top stroke', R.strokeWeight, 'side-t'),
+				field({ k: 'node', f: 'strokeRightWeight' }, 'Right stroke', R.strokeWeight, 'side-r'),
+				field({ k: 'node', f: 'strokeBottomWeight' }, 'Bottom stroke', R.strokeWeight, 'side-b'),
 			)
-			if (weight.length) g.sections.push({ title: 'Weight', fields: weight })
+			if (weight.length) g.sections.push(expandable(weight, ['node:strokeWeightAll'], 'individual sides'))
 		}
 	}
 
@@ -170,34 +196,35 @@ export async function analyze(): Promise<SelectionInfo> {
 				const e = effects[i]
 				const progressive = 'blurType' in e && (e as BlurEffect).blurType === 'PROGRESSIVE'
 				const base = EFFECT_LABEL[e.type] ?? e.type
-				const title = (progressive ? `Progressive ${base.toLowerCase()}` : base) + (e.visible === false ? ' · hidden' : '')
+				const title = progressive ? `Progressive ${base.toLowerCase()}` : base
+				const dim = e.visible === false
 				if (e.type === 'DROP_SHADOW' || e.type === 'INNER_SHADOW') {
 					g.sections.push({
 						title,
+						dim,
 						fields: fields(
-							field({ k: 'effect', i, f: 'offsetX' }, 'X', R.effectFloat),
-							field({ k: 'effect', i, f: 'offsetY' }, 'Y', R.effectFloat),
-							field({ k: 'effect', i, f: 'radius' }, 'Blur', R.effectFloat),
-							field({ k: 'effect', i, f: 'spread' }, 'Spread', R.effectFloat),
-							field({ k: 'effect', i, f: 'color' }, 'Color', R.effectColor),
+							field({ k: 'effect', i, f: 'offsetX' }, `${title} X`, R.effectFloat, T('X')),
+							field({ k: 'effect', i, f: 'offsetY' }, `${title} Y`, R.effectFloat, T('Y')),
+							field({ k: 'effect', i, f: 'radius' }, `${title} blur`, R.effectFloat, 'blur'),
+							field({ k: 'effect', i, f: 'spread' }, `${title} spread`, R.effectFloat, 'spread'),
+							field({ k: 'effect', i, f: 'color' }, `${title} color`, R.effectColor),
 						),
 					})
 				} else if (effectSupports(e, 'radius')) {
 					g.sections.push({
 						title,
+						dim,
 						note: progressive ? 'Start blur can’t be bound' : undefined,
-						fields: fields(field({ k: 'effect', i, f: 'radius' }, progressive ? 'End blur' : 'Blur', R.effectFloat)),
+						fields: fields(field({ k: 'effect', i, f: 'radius' }, progressive ? `${title} end` : `${title} radius`, R.effectFloat, 'blur')),
 					})
-				} else g.sections.push({ title, note: 'Can’t bind variables', fields: [] })
+				} else g.sections.push({ title, dim, note: 'Can’t bind variables', fields: [] })
 			}
 			if (!effects.length) g.sections.push({ note: 'No effects', fields: [] })
 		}
 	}
 
-	// --- More
-	const more = { id: 'more', label: 'More', sections: [] as any[], styles: undefined as StyleInfo[] | undefined }
-	const layer = fields(field({ k: 'node', f: 'opacity' }, 'Opacity', R.opacity), field({ k: 'node', f: 'visible' }, 'Visible', R.none))
-	if (layer.length) more.sections.push({ fields: layer })
+	// --- Layout guides
+	const more = { id: 'guides', label: 'Layout guide', sections: [] as RawSection[], styles: undefined as StyleInfo[] | undefined }
 	if (every('layoutGrids') && nodes.some(n => ((n as any).layoutGrids as LayoutGrid[]).length)) {
 		const style = await styleInfo(nodes, 'grid')
 		const lists = nodes.map(n => (n as any).layoutGrids as LayoutGrid[])
@@ -207,10 +234,14 @@ export async function analyze(): Promise<SelectionInfo> {
 		else {
 			lists[0].forEach((lg, i) => {
 				const title = lg.pattern === 'GRID' ? 'Grid' : lg.pattern === 'COLUMNS' ? 'Columns' : 'Rows'
-				const sizeLabel = lg.pattern === 'ROWS' ? 'Height' : lg.pattern === 'COLUMNS' ? 'Width' : 'Size'
-				const f = (gf: 'count' | 'gutterSize' | 'offset' | 'sectionSize', label: string) =>
-					gridSupports(lg, gf) ? field({ k: 'grid', i, f: gf }, label, R.none) : null
-				more.sections.push({ title, fields: fields(f('count', 'Count'), f('sectionSize', sizeLabel), f('gutterSize', 'Gutter'), f('offset', 'Offset')) })
+				const sizeLabel = lg.pattern === 'ROWS' ? 'height' : lg.pattern === 'COLUMNS' ? 'width' : 'size'
+				const f = (gf: 'count' | 'gutterSize' | 'offset' | 'sectionSize', label: string, icon: Glyph) =>
+					gridSupports(lg, gf) ? field({ k: 'grid', i, f: gf }, `${title} ${label}`, R.none, icon) : null
+				more.sections.push({
+					title,
+					dim: lg.visible === false,
+					fields: fields(f('count', 'count', 'grid-count'), f('sectionSize', sizeLabel, 'grid-size'), f('gutterSize', 'gutter', 'grid-gutter'), f('offset', 'offset', 'grid-offset')),
+				})
 			})
 		}
 	}
@@ -228,8 +259,7 @@ export async function analyze(): Promise<SelectionInfo> {
 		styles: g.styles,
 		notice: g.notice,
 		sections: g.sections.map((s): Section => ({
-			title: s.title,
-			note: s.note,
+			...s,
 			fields: s.fields.map(({ boundId, ...f }) => ({ ...f, bound: boundId === MIXED ? 'mixed' : boundId ? refs.get(boundId)! : null })),
 		})),
 	}))

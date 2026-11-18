@@ -1,54 +1,49 @@
 <script lang="ts">
 	import type { GroupState } from '../../shared/types'
 	import { app, post } from '../state.svelte'
-	import FieldRow from './FieldRow.svelte'
 	import Icon from './Icon.svelte'
+	import Section from './Section.svelte'
 
+	// A properties panel section: 40px title row, rows, 12px bottom padding, divider
 	let { group }: { group: GroupState } = $props()
 
 	const open = $derived(!app.collapsed[group.id])
 	const toggle = () => (app.collapsed[group.id] = open)
 </script>
 
-<section class="group">
-	<button class="head" aria-expanded={open} onclick={toggle}>
-		<span class="chevron" class:open><Icon name="chevron" /></span>
-		<span>{group.label}</span>
+<section class="group" class:open>
+	<button class="title" aria-expanded={open} onclick={toggle}>
+		<span class="chevron"><Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} /></span>
+		<span class="ellipsis">{group.label}</span>
 	</button>
 
 	{#if open}
-		<div class="body">
-			{#each group.styles ?? [] as style (style.kind)}
-				<div class="style">
-					<span class="style-chip" title={style.mixed ? 'Selected layers use different styles' : style.name}>
-						<Icon name="style" />
-						<span class="style-name">{style.name}</span>
-					</span>
-					<button
-						class="icon-button"
-						title="Detach style"
-						aria-label="Detach style"
-						disabled={app.busy}
-						onclick={() => post({ type: 'detach-style', kind: style.kind })}
-					>
-						<Icon name="detach" />
-					</button>
-				</div>
-				<p class="note">Detach the style to bind variables here.</p>
-			{/each}
+		{#each group.styles ?? [] as style (style.kind)}
+			<div class="row">
+				<span class="style" title={style.mixed ? 'Selected layers use different styles' : style.name}>
+					<span class="prefix"><Icon name="style" /></span>
+					<span class="ellipsis">{style.name}</span>
+				</span>
+				<button
+					class="icon-button"
+					title="Detach style"
+					aria-label="Detach style"
+					disabled={app.busy}
+					onclick={() => post({ type: 'detach-style', kind: style.kind })}
+				>
+					<Icon name="detach" />
+				</button>
+			</div>
+			<p class="note">Detach the style to bind variables here.</p>
+		{/each}
 
-			{#if group.notice}
-				<p class="notice">{group.notice}</p>
-			{/if}
+		{#if group.notice}
+			<p class="note">{group.notice}</p>
+		{/if}
 
-			{#each group.sections as section, i (i)}
-				{#if section.title}<h3 class="sub">{section.title}</h3>{/if}
-				{#if section.note}<p class="note">{section.note}</p>{/if}
-				{#each section.fields as field (field.key)}
-					<FieldRow {field} context={section.title ?? group.label} />
-				{/each}
-			{/each}
-		</div>
+		{#each group.sections as section, i (i)}
+			<Section {section} />
+		{/each}
 	{/if}
 </section>
 
@@ -57,80 +52,76 @@
 		border-bottom: 1px solid var(--border);
 	}
 
-	.head {
+	.group:last-child {
+		border-bottom: none;
+	}
+
+	.group.open {
+		padding-bottom: 12px;
+	}
+
+	.title {
+		position: relative;
 		display: flex;
 		align-items: center;
-		gap: 2px;
 		width: 100%;
-		height: 40px;
-		padding: 0 var(--gutter) 0 4px;
+		height: var(--title-row);
+		padding: 0 8px 0 16px;
 		font-weight: 550;
-		text-align: left;
-	}
-
-	.chevron {
-		width: 12px;
-		display: grid;
-		place-items: center;
-		color: var(--icon-secondary);
-		transition: transform 120ms ease-out;
-	}
-
-	.chevron.open {
-		transform: rotate(90deg);
-	}
-
-	.body {
-		padding-bottom: 8px;
-		margin-top: -4px;
-	}
-
-	.sub {
-		font-size: 11px;
-		font-weight: 450;
-		color: var(--text);
-		padding: 8px var(--gutter) 2px;
-	}
-
-	.note,
-	.notice {
-		padding: 2px var(--gutter) 6px;
+		letter-spacing: 0.01em;
 		color: var(--text-secondary);
 	}
 
-	.notice {
-		margin: 0 8px 4px var(--gutter);
-		padding: 6px 8px;
-		border-radius: var(--radius);
-		background: var(--bg-warning);
-		color: var(--text-warning);
+	.group.open .title {
+		color: var(--text);
+	}
+
+	/* Chevron sits in the left gutter and shows on hover, as in Figma's collapsible sections */
+	.chevron {
+		position: absolute;
+		left: 0;
+		width: 16px;
+		display: grid;
+		place-items: center;
+		color: var(--icon-secondary);
+		opacity: 0;
+		transition: opacity 100ms ease-out;
+	}
+
+	.title:hover .chevron,
+	.title:focus-visible .chevron {
+		opacity: 1;
+	}
+
+	.row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) var(--control);
+		column-gap: 8px;
+		align-items: center;
+		height: var(--row);
+		padding: 0 8px 0 16px;
 	}
 
 	.style {
 		display: flex;
 		align-items: center;
-		gap: 4px;
-		height: 28px;
-		padding: 0 8px 0 var(--gutter);
-	}
-
-	.style-chip {
-		flex: 1;
 		min-width: 0;
 		height: var(--control);
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 0 8px 0 4px;
+		padding-right: 8px;
 		border-radius: var(--radius);
 		background: var(--bg-secondary);
+	}
+
+	.prefix {
+		width: var(--control);
+		display: grid;
+		place-items: center;
+		flex: none;
 		color: var(--icon-secondary);
 	}
 
-	.style-name {
-		color: var(--text);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+	.note {
+		padding: 4px 8px 4px 16px;
+		color: var(--text-secondary);
 	}
 </style>
