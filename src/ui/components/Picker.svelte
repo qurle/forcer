@@ -1,13 +1,17 @@
 <script lang="ts">
-	import { tick, untrack } from 'svelte'
+	import { onMount, tick, untrack } from 'svelte'
 	import type { CollectionInfo, FieldState, VarItem } from '../../shared/types'
-	import { app, formatNum, inScope, isBoundTo, leaf, path, post } from '../state.svelte'
+	import { app, closePicker, formatNum, inScope, isBoundTo, leaf, path, post } from '../state.svelte'
 	import Icon from './Icon.svelte'
 	import Swatch from './Swatch.svelte'
 
-	let { field }: { field: FieldState } = $props()
+	// Variable picker as a popover anchored to the input, styled after Figma's variable picker
+	let { field, anchor }: { field: FieldState; anchor: HTMLElement } = $props()
 
-	const TYPE_NAME = { COLOR: 'color', FLOAT: 'number', BOOLEAN: 'boolean' } as const
+	const TYPE_NAME = { COLOR: 'Color', FLOAT: 'Number', BOOLEAN: 'Boolean' } as const
+	const MARGIN = 8
+	const MAX_HEIGHT = 420
+	const MIN_HEIGHT = 200
 
 	function initialCollection(): string {
 		const cols = app.collections
@@ -23,8 +27,44 @@
 
 	let collectionId = $state(untrack(initialCollection))
 	let query = $state('')
-	let active = $state(0)
+	let active = $state(-1)
 	let listEl: HTMLDivElement | undefined = $state()
+	let searchEl: HTMLInputElement | undefined = $state()
+
+	// ---------- Placement: below the input, or above when there's more room, clamped to the iframe ----------
+
+	let pos = $state({ left: 0, top: 0, width: 0, maxHeight: 0, above: false })
+
+	function place() {
+		const r = anchor.getBoundingClientRect()
+		const vw = window.innerWidth
+		const vh = window.innerHeight
+		const width = Math.min(vw - MARGIN * 2, 320)
+		const left = Math.max(MARGIN, Math.min(r.left, vw - width - MARGIN))
+		const below = vh - r.bottom - MARGIN - 4
+		const aboveSpace = r.top - MARGIN - 4
+		if (below >= Math.min(MAX_HEIGHT, MIN_HEIGHT * 1.5) || below >= aboveSpace) {
+			pos = { left, width, top: r.bottom + 4, maxHeight: Math.min(MAX_HEIGHT, Math.max(below, MIN_HEIGHT)), above: false }
+		} else {
+			const maxHeight = Math.min(MAX_HEIGHT, aboveSpace)
+			pos = { left, width, top: r.top - 4, maxHeight, above: true }
+		}
+		// Not enough room on either side: cover the window
+		if (pos.maxHeight > vh - MARGIN * 2) pos = { ...pos, top: MARGIN, maxHeight: vh - MARGIN * 2, above: false }
+		else if (!pos.above && pos.top + pos.maxHeight > vh - MARGIN) pos = { ...pos, top: vh - MARGIN - pos.maxHeight }
+	}
+
+	onMount(() => {
+		// A partly scrolled-out input (keyboard focus) would push the popover off-screen
+		anchor.scrollIntoView({ block: 'nearest' })
+		place()
+		searchEl?.focus()
+		const onResize = () => place()
+		window.addEventListener('resize', onResize)
+		return () => window.removeEventListener('resize', onResize)
+	})
+
+	// ---------- Data ----------
 
 	// Collections may arrive after the picker opened
 	$effect(() => {
@@ -54,17 +94,27 @@
 	const matches = $derived(ofType.filter(i => tokens.every(t => i.name.toLowerCase().includes(t))))
 	const loadingScopes = $derived(!!entry && entry.pending > 0)
 
+	/** Keeps folders together, root-level variables first, as Figma's picker lists them */
+	function byFolder(items: VarItem[]) {
+		const groups = new Map<string, VarItem[]>([['', []]])
+		for (const i of items) {
+			const f = path(i.name)
+			if (!groups.has(f)) groups.set(f, [])
+			groups.get(f)!.push(i)
+		}
+		return [...groups.values()].flat()
+	}
+
 	const sections = $derived.by(() => {
-		if (!field.scopeReq.length) return [{ title: '', items: matches }]
-		if (loadingScopes) return [{ title: '', items: matches }]
+		if (!field.scopeReq.length || loadingScopes) return [{ title: '', items: byFolder(matches) }]
 		const out: VarItem[] = []
 		const inside: VarItem[] = []
 		const unknown: VarItem[] = []
 		for (const i of matches) (i.scopes === null ? unknown : inScope(i.scopes, field.scopeReq) ? inside : out).push(i)
 		return [
-			{ title: 'Out of scope', items: out },
-			{ title: 'In scope', items: inside },
-			{ title: 'Scope unknown', items: unknown },
+			{ title: 'Out of scope', items: byFolder(out) },
+			{ title: 'In scope', items: byFolder(inside) },
+			{ title: 'Scope unknown', items: byFolder(unknown) },
 		].filter(s => s.items.length)
 	})
 
@@ -74,19 +124,21 @@
 		// Reset keyboard focus when the list changes shape
 		void collectionId
 		void query
-		active = 0
+		active = -1
 	})
+
+	// ---------- Actions ----------
 
 	function choose(item: VarItem) {
 		post({ type: 'bind', field: field.key, ref: item.ref })
 		app.prefs.lastCollection[field.type] = collectionId
 		post({ type: 'save-prefs', prefs: $state.snapshot(app.prefs) })
-		app.picker = null
+		closePicker()
 	}
 
 	async function move(delta: number) {
 		if (!flat.length) return
-		active = (active + delta + flat.length) % flat.length
+		active = active < 0 ? (delta > 0 ? 0 : flat.length - 1) : (active + delta + flat.length) % flat.length
 		await tick()
 		listEl?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' })
 	}
@@ -94,31 +146,52 @@
 	function onkeydown(e: KeyboardEvent) {
 		if (e.key === 'ArrowDown') { e.preventDefault(); move(1) }
 		else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1) }
-		else if (e.key === 'Enter' && flat[active]) { e.preventDefault(); choose(flat[active]) }
-		else if (e.key === 'Escape') { e.preventDefault(); app.picker = null }
+		else if (e.key === 'Enter' && flat[Math.max(0, active)]) { e.preventDefault(); choose(flat[Math.max(0, active)]) }
+		else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePicker() }
 	}
-
-	const focus = (el: HTMLElement) => el.focus()
 </script>
 
+<div class="backdrop" role="presentation" onpointerdown={closePicker}></div>
+
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="picker" role="dialog" aria-label="Choose variable" tabindex="-1" {onkeydown}>
+<div
+	class="menu"
+	class:above={pos.above}
+	role="dialog"
+	aria-label="Choose a variable for {field.label}"
+	tabindex="-1"
+	style:left="{pos.left}px"
+	style:top="{pos.top}px"
+	style:width="{pos.width}px"
+	style:max-height="{pos.maxHeight}px"
+	{onkeydown}
+>
 	<header>
 		<div class="titles">
-			<span class="title">{app.pickerContext || field.label}</span>
-			<span class="subtitle">{TYPE_NAME[field.type]} variables</span>
+			<span class="title ellipsis" title={field.label}>{field.label}</span>
+			<span class="subtitle">{TYPE_NAME[field.type]}</span>
 		</div>
-		<button class="icon-button" title="Close" aria-label="Close" onclick={() => (app.picker = null)}>
+		<button
+			class="icon-button"
+			class:spinning={app.collectionsLoading}
+			title="Reload libraries"
+			aria-label="Reload libraries"
+			onclick={() => post({ type: 'refresh-collections' })}
+		>
+			<Icon name="refresh" />
+		</button>
+		<button class="icon-button" title="Close" aria-label="Close" onclick={closePicker}>
 			<Icon name="close" />
 		</button>
 	</header>
 
-	{#if app.selection?.instance}
-		<p class="warning"><Icon name="instance" size={12} /> Overriding the instance</p>
-	{/if}
+	<label class="search">
+		<span class="search-icon"><Icon name="search" /></span>
+		<input bind:this={searchEl} bind:value={query} placeholder="Search" spellcheck="false" aria-label="Search variables" />
+	</label>
 
-	<div class="controls">
-		<div class="select-row">
+	<div class="filter">
+		<span class="select">
 			<select bind:value={collectionId} aria-label="Collection">
 				{#each libraries as [library, cols] (library)}
 					<optgroup label={library}>
@@ -128,31 +201,23 @@
 					</optgroup>
 				{/each}
 			</select>
-			<button
-				class="icon-button"
-				class:spinning={app.collectionsLoading}
-				title="Reload libraries"
-				aria-label="Reload libraries"
-				onclick={() => post({ type: 'refresh-collections' })}
-			>
-				<Icon name="refresh" />
-			</button>
-		</div>
-		<label class="search">
-			<Icon name="search" />
-			<input use:focus bind:value={query} placeholder="Search" spellcheck="false" />
-		</label>
-		{#if app.collectionsError}<p class="hint error">{app.collectionsError}</p>{/if}
+			<span class="select-chevron"><Icon name="chevron-down" size={16} /></span>
+		</span>
+		{#if loadingScopes && entry}
+			<span class="progress tabular" title="Importing variables to read their scopes">
+				{entry.items.length - entry.pending}/{entry.items.length}
+			</span>
+		{/if}
 	</div>
 
 	{#if loadingScopes && entry}
-		<div class="progress" title="Importing variables to read their scopes">
-			<span>Reading scopes {entry.items.length - entry.pending}/{entry.items.length}</span>
-			<span class="bar"><span style:width={`${((entry.items.length - entry.pending) / Math.max(1, entry.items.length)) * 100}%`}></span></span>
-		</div>
+		<span class="bar" aria-hidden="true">
+			<span style:width={`${((entry.items.length - entry.pending) / Math.max(1, entry.items.length)) * 100}%`}></span>
+		</span>
 	{/if}
 
 	<div class="list" bind:this={listEl}>
+		{#if app.collectionsError}<p class="hint error">{app.collectionsError}</p>{/if}
 		{#if !collectionId}
 			<p class="hint">{app.collectionsLoading ? 'Loading libraries…' : 'No variable collections available'}</p>
 		{:else if !entry}
@@ -160,26 +225,34 @@
 		{:else if entry.error}
 			<p class="hint error">{entry.error}</p>
 		{:else if !matches.length}
-			<p class="hint">{query ? 'No matches' : `No ${TYPE_NAME[field.type]} variables in this collection`}</p>
+			<p class="hint">{query ? 'No matches' : `No ${TYPE_NAME[field.type].toLowerCase()} variables in this collection`}</p>
 		{:else}
 			{#each sections as section (section.title)}
 				{#if section.title}<h3 class="section">{section.title}</h3>{/if}
-				{#each section.items as item (item.ref)}
+				{#each section.items as item, j (item.ref)}
 					{@const index = flat.indexOf(item)}
+					{@const folder = path(item.name)}
+					{#if folder && folder !== path(section.items[j - 1]?.name ?? '')}
+						<p class="folder ellipsis" title={folder.slice(0, -1)}>{folder.slice(0, -1)}</p>
+					{/if}
 					<button
 						class="item"
 						class:active={index === active}
 						class:current={isBoundTo(field, item)}
 						data-index={index}
 						title={item.name}
-						onmouseenter={() => (active = index)}
+						onpointermove={() => (active = index)}
 						onclick={() => choose(item)}
 					>
-						{#if item.type === 'COLOR'}
-							{#if item.preview?.t === 'color'}<Swatch hex={item.preview.hex} a={item.preview.a} />{:else}<span class="swatch-placeholder"></span>{/if}
-						{/if}
-						<span class="name"><span class="path">{path(item.name)}</span>{leaf(item.name)}</span>
-						{#if item.preview?.t === 'num'}<span class="value">{formatNum(item.preview.v)}</span>{/if}
+						<span class="chit">
+							{#if item.type === 'COLOR'}
+								{#if item.preview?.t === 'color'}<Swatch hex={item.preview.hex} a={item.preview.a} size={16} />{:else}<span class="chit-empty"></span>{/if}
+							{:else}
+								<Icon name={item.type === 'BOOLEAN' ? 'boolean' : 'number'} />
+							{/if}
+						</span>
+						<span class="name ellipsis">{leaf(item.name)}</span>
+						{#if item.preview?.t === 'num'}<span class="value tabular">{formatNum(item.preview.v)}</span>{/if}
 						{#if item.preview?.t === 'bool'}<span class="value">{item.preview.v ? 'True' : 'False'}</span>{/if}
 						{#if isBoundTo(field, item)}<span class="check"><Icon name="check" /></span>{/if}
 					</button>
@@ -190,26 +263,49 @@
 </div>
 
 <style>
-	.picker {
+	.backdrop {
 		position: fixed;
 		inset: 0;
-		z-index: 10;
+		z-index: 20;
+	}
+
+	.menu {
+		position: fixed;
+		z-index: 21;
 		display: flex;
 		flex-direction: column;
+		min-height: 0;
+		border-radius: var(--radius-large);
 		background: var(--bg);
+		box-shadow: var(--elevation-popover);
+		overflow: hidden;
 		outline: none;
-		animation: enter 140ms cubic-bezier(0.2, 0, 0, 1);
+		transform-origin: top left;
+		animation: enter 120ms cubic-bezier(0.2, 0, 0, 1);
+	}
+
+	.menu.above {
+		transform: translateY(-100%);
+		transform-origin: bottom left;
+		animation-name: enter-above;
 	}
 
 	@keyframes enter {
 		from {
 			opacity: 0;
-			transform: translateY(6px);
+			transform: scale(0.97);
+		}
+	}
+
+	@keyframes enter-above {
+		from {
+			opacity: 0;
+			transform: translateY(-100%) scale(0.97);
 		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.picker {
+		.menu {
 			animation: none;
 		}
 	}
@@ -217,11 +313,11 @@
 	header {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		height: 40px;
-		padding: 0 8px 0 var(--gutter);
-		border-bottom: 1px solid var(--border);
+		gap: 4px;
+		height: var(--title-row);
+		padding: 0 8px 0 16px;
 		flex: none;
+		box-shadow: inset 0 -1px 0 var(--border);
 	}
 
 	.titles {
@@ -234,69 +330,36 @@
 
 	.title {
 		font-weight: 550;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		letter-spacing: 0.01em;
 	}
 
 	.subtitle {
-		color: var(--text-secondary);
-		white-space: nowrap;
-	}
-
-	.warning {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		margin: 8px 8px 0 var(--gutter);
-		padding: 4px 8px;
-		border-radius: var(--radius);
-		background: var(--bg-component);
-		color: var(--text-component);
-	}
-
-	.controls {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		padding: 8px 8px 8px var(--gutter);
 		flex: none;
-	}
-
-	.select-row {
-		display: flex;
-		gap: 4px;
-	}
-
-	select {
-		flex: 1;
-		min-width: 0;
-		height: var(--control);
-		padding: 0 6px;
-		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		background: var(--bg);
+		color: var(--text-secondary);
 	}
 
 	.search {
 		display: flex;
 		align-items: center;
-		gap: 4px;
-		height: var(--control);
-		margin-right: 28px;
-		padding: 0 8px 0 4px;
-		border-radius: var(--radius);
-		background: var(--bg-secondary);
-		color: var(--icon-secondary);
+		height: 41px;
+		padding: 0 16px 0 8px;
+		border-bottom: 1px solid var(--border);
+		flex: none;
 	}
 
-	.search:focus-within {
-		box-shadow: inset 0 0 0 1px var(--border-selected);
+	.search-icon {
+		width: var(--control);
+		display: grid;
+		place-items: center;
+		color: var(--icon-secondary);
+		flex: none;
 	}
 
 	.search input {
 		flex: 1;
 		min-width: 0;
+		height: var(--control);
+		padding-left: 4px;
 		border: none;
 		outline: none;
 		background: none;
@@ -305,6 +368,72 @@
 
 	.search input::placeholder {
 		color: var(--text-tertiary);
+	}
+
+	.filter {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		height: 41px;
+		padding: 0 16px 0 8px;
+		border-bottom: 1px solid var(--border);
+		flex: none;
+	}
+
+	/* Figma's dropdown button: bordered, white, chevron at the end */
+	.select {
+		position: relative;
+		display: flex;
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	select {
+		appearance: none;
+		min-width: 0;
+		max-width: 100%;
+		height: var(--control);
+		padding: 0 24px 0 8px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--bg);
+		color: var(--text);
+		text-overflow: ellipsis;
+		outline: none;
+	}
+
+	select:focus-visible {
+		border-color: var(--border-selected);
+	}
+
+	.select-chevron {
+		position: absolute;
+		right: 4px;
+		top: 4px;
+		color: var(--icon);
+		pointer-events: none;
+	}
+
+	.progress {
+		margin-left: auto;
+		color: var(--text-secondary);
+		flex: none;
+	}
+
+	.bar {
+		display: block;
+		height: 2px;
+		margin-top: -2px;
+		background: transparent;
+		flex: none;
+		position: relative;
+	}
+
+	.bar span {
+		display: block;
+		height: 100%;
+		background: var(--bg-brand);
+		transition: width 200ms ease-out;
 	}
 
 	.spinning :global(svg) {
@@ -317,55 +446,41 @@
 		}
 	}
 
-	.progress {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 0 var(--gutter) 6px;
-		color: var(--text-secondary);
-		flex: none;
-	}
-
-	.bar {
-		flex: 1;
-		height: 2px;
-		border-radius: 1px;
-		background: var(--bg-tertiary);
-		overflow: hidden;
-	}
-
-	.bar span {
-		display: block;
-		height: 100%;
-		background: var(--bg-brand);
-		transition: width 200ms ease-out;
-	}
-
 	.list {
 		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
-		padding: 0 0 8px;
-		border-top: 1px solid var(--border);
+		padding: 8px 0;
 	}
 
 	.section {
 		position: sticky;
-		top: 0;
-		padding: 10px var(--gutter) 4px;
+		top: -8px;
+		z-index: 1;
+		display: flex;
+		align-items: center;
+		height: var(--row);
+		padding: 0 16px;
 		background: var(--bg);
 		font-size: 11px;
 		font-weight: 550;
+		letter-spacing: 0.01em;
 		color: var(--text-secondary);
+	}
+
+	.folder {
+		height: var(--row);
+		padding: 8px 16px;
+		color: var(--text);
 	}
 
 	.item {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 12px;
 		width: 100%;
-		height: 28px;
-		padding: 0 var(--gutter);
-		text-align: left;
+		height: var(--row);
+		padding: 0 16px 0 20px;
 	}
 
 	.item.active {
@@ -376,45 +491,47 @@
 		background: var(--bg-selected);
 	}
 
-	.swatch-placeholder {
-		width: 14px;
-		height: 14px;
-		border-radius: 3px;
-		background: var(--bg-tertiary);
+	.chit {
+		width: 16px;
+		height: 16px;
+		display: grid;
+		place-items: center;
 		flex: none;
+		color: var(--icon-secondary);
+	}
+
+	.chit :global(svg) {
+		margin: -4px;
+	}
+
+	.chit-empty {
+		width: 16px;
+		height: 16px;
+		border-radius: 20%;
+		background: var(--bg-tertiary);
 	}
 
 	.name {
 		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.path {
-		color: var(--text-secondary);
 	}
 
 	.value {
+		flex: none;
 		color: var(--text-secondary);
-		font-variant-numeric: tabular-nums;
 	}
 
 	.check {
-		color: var(--text-brand);
+		flex: none;
+		margin: 0 -4px;
+		color: var(--icon-brand);
 	}
 
 	.hint {
-		padding: 16px var(--gutter);
+		padding: 8px 16px;
 		color: var(--text-secondary);
 	}
 
-	.controls .hint {
-		padding: 0;
-	}
-
 	.error {
-		color: var(--text-warning);
+		color: var(--text-danger);
 	}
 </style>

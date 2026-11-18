@@ -8,8 +8,8 @@ export type NodeField =
 	| 'topLeftRadius' | 'topRightRadius' | 'bottomRightRadius' | 'bottomLeftRadius'
 	| 'strokeTopWeight' | 'strokeRightWeight' | 'strokeBottomWeight' | 'strokeLeftWeight'
 	| 'opacity' | 'visible'
-	// Virtual fields: bind all corners / all sides at once
-	| 'radiusAll' | 'strokeWeightAll'
+	// Virtual fields: bind all corners / all sides / a padding pair at once
+	| 'radiusAll' | 'strokeWeightAll' | 'paddingX' | 'paddingY'
 
 export type PaintProp = 'fills' | 'strokes'
 export type EffectField = 'offsetX' | 'offsetY' | 'radius' | 'spread' | 'color'
@@ -23,6 +23,7 @@ export type Addr =
 
 export const CORNERS = ['topLeftRadius', 'topRightRadius', 'bottomRightRadius', 'bottomLeftRadius'] as const
 export const SIDES = ['strokeTopWeight', 'strokeRightWeight', 'strokeBottomWeight', 'strokeLeftWeight'] as const
+const PADDING_PAIR = { paddingX: ['paddingLeft', 'paddingRight'], paddingY: ['paddingTop', 'paddingBottom'] } as const
 
 export const MIXED = 'mixed' as const
 export type Bound = string | null | typeof MIXED
@@ -144,6 +145,11 @@ function readNodeField(n: any, f: NodeField): Read | null {
 		case 'paddingTop': case 'paddingRight': case 'paddingBottom': case 'paddingLeft':
 			if (!isAutoLayout(n)) return null
 			return { value: num(n[f]), bound: aliasId(bv, f) }
+		case 'paddingX': case 'paddingY': {
+			if (!isAutoLayout(n)) return null
+			const [a, b] = PADDING_PAIR[f]
+			return { value: n[a] === n[b] ? num(n[a]) : { t: 'mixed' }, bound: sameOrMixed([aliasId(bv, a), aliasId(bv, b)]) }
+		}
 		case 'itemSpacing':
 			if (n.layoutMode !== 'HORIZONTAL' && n.layoutMode !== 'VERTICAL') return null
 			return { value: n.primaryAxisAlignItems === 'SPACE_BETWEEN' ? { t: 'auto' } : num(n.itemSpacing), bound: aliasId(bv, f) }
@@ -214,6 +220,8 @@ export function writeField(node: SceneNode, a: Addr, v: Variable | null) {
 			} else if (a.f === 'strokeWeightAll') {
 				if ('strokeTopWeight' in n) SIDES.forEach(s => bindNode(n, s, v))
 				else bindNode(n, 'strokeWeight', v)
+			} else if (a.f === 'paddingX' || a.f === 'paddingY') {
+				PADDING_PAIR[a.f].forEach(p => bindNode(n, p, v))
 			} else bindNode(n, a.f, v)
 			return
 		}
