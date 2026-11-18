@@ -7,9 +7,6 @@ out/
 dist/
 code.js
 
-# Astro
-.astro
-
 # Typescript
 **/*.d.ts
 

@@ -1,0 +1,100 @@
+/* Tokens map onto Figma's theme variables (themeColors: true), with light fallbacks for browser previews */
+:root {
+	--bg: var(--figma-color-bg, #ffffff);
+	--bg-secondary: var(--figma-color-bg-secondary, #f5f5f5);
+	--bg-tertiary: var(--figma-color-bg-tertiary, #e6e6e6);
+	--bg-hover: var(--figma-color-bg-hover, #f5f5f5);
+	--bg-pressed: var(--figma-color-bg-pressed, #e6e6e6);
+	--bg-selected: var(--figma-color-bg-selected, #e5f4ff);
+	--bg-brand: var(--figma-color-bg-brand, #0d99ff);
+	--bg-warning: var(--figma-color-bg-warning-tertiary, #fff1c2);
+	--bg-component: var(--figma-color-bg-component-tertiary, #f1e3ff);
+	--text: var(--figma-color-text, rgba(0, 0, 0, 0.9));
+	--text-secondary: var(--figma-color-text-secondary, rgba(0, 0, 0, 0.5));
+	--text-tertiary: var(--figma-color-text-tertiary, rgba(0, 0, 0, 0.3));
+	--text-brand: var(--figma-color-text-brand, #007be5);
+	--text-onbrand: var(--figma-color-text-onbrand, #ffffff);
+	--text-warning: var(--figma-color-text-warning, #b86200);
+	--text-component: var(--figma-color-text-component, #9747ff);
+	--icon: var(--figma-color-icon, rgba(0, 0, 0, 0.9));
+	--icon-secondary: var(--figma-color-icon-secondary, rgba(0, 0, 0, 0.5));
+	--border: var(--figma-color-border, #e6e6e6);
+	--border-strong: var(--figma-color-border-strong, #d9d9d9);
+	--border-selected: var(--figma-color-border-selected, #0d99ff);
+
+	--radius: 5px;
+	--row: 32px;
+	--control: 24px;
+	--gutter: 16px;
+
+	color-scheme: light dark;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html,
+body,
+#app {
+	height: 100%;
+}
+
+body {
+	background: var(--bg);
+	color: var(--text);
+	font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	font-size: 11px;
+	line-height: 16px;
+	letter-spacing: 0.005em;
+	-webkit-font-smoothing: antialiased;
+	overflow: hidden;
+	user-select: none;
+}
+
+button,
+input,
+select {
+	font: inherit;
+	color: inherit;
+	letter-spacing: inherit;
+}
+
+button {
+	background: none;
+	border: none;
+	cursor: default;
+}
+
+:focus-visible {
+	outline: 1px solid var(--border-selected);
+	outline-offset: -1px;
+}
+
+.icon-button {
+	width: var(--control);
+	height: var(--control);
+	display: inline-grid;
+	place-items: center;
+	border-radius: var(--radius);
+	color: var(--icon-secondary);
+	flex: none;
+}
+
+.icon-button:hover {
+	background: var(--bg-hover);
+	color: var(--icon);
+}
+
+.icon-button:active {
+	background: var(--bg-pressed);
+}
+
+.icon-button:disabled {
+	opacity: 0.4;
+	pointer-events: none;
+}
