@@ -10,6 +10,7 @@
 
 	const TYPE_NAME = { COLOR: 'Color', FLOAT: 'Number', BOOLEAN: 'Boolean' } as const
 	const MARGIN = 8
+	const MAX_WIDTH = 240
 	const MAX_HEIGHT = 420
 	const MIN_HEIGHT = 200
 
@@ -39,7 +40,7 @@
 		const r = anchor.getBoundingClientRect()
 		const vw = window.innerWidth
 		const vh = window.innerHeight
-		const width = Math.min(vw - MARGIN * 2, 320)
+		const width = Math.min(vw - MARGIN * 2, MAX_WIDTH)
 		const left = Math.max(MARGIN, Math.min(r.left, vw - width - MARGIN))
 		const below = vh - r.bottom - MARGIN - 4
 		const aboveSpace = r.top - MARGIN - 4
