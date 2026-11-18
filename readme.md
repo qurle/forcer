@@ -1,91 +1,76 @@
-## Plugin Starter
+# Forcer
 
-A starter template for building Figma plugins with **TypeScript**, **Astro**, and **Vite**. Contains everything you need to get started with a fully typed, modern plugin development setup.
+Figma plugin that binds variables to layer fields **regardless of variable scopes**.
 
-### Why Astro?
+The design system team publishes kit-only variables with empty scopes, so they stay out of other designers' pickers. Figma's UI won't let you bind those variables, but the Plugin API does. Forcer is a short-listed property panel for doing exactly that.
 
-I find [Astro](https://astro.build) a perfect tool for building simple web interfaces. Same vanila flavour + components. And you can also use React, Vue and Svelte components inside! 
+![Forcer cover](assets/cover.png)
 
-## **How to use**
+## How to use
 
-### Quick start
+1. Select one or more layers.
+2. Open a field (Size, Auto layout, Corner radius, Fill, Stroke, Effects, More) and click its value.
+3. Pick a collection, search, click a variable. Out-of-scope variables are listed first.
+4. Use the detach icon to unbind a variable (the current value is kept), or to detach a style.
 
-1. Install [Node.js](https://nodejs.org/en/download)
-2. Clone / download the repo 
-3. Run `npm i` in terminal to install dependencies
-4. Run `npm run dev` to keep plugin updated on each change
+Bindings apply to the whole selection as a single undo step.
 
-### Running plugin in Figma
+## What can be bound
 
-You need Figma desktop app to test local plugins.
-Go to Actions `⌘K` › Plugins & Widgets › Import from manifest (at the bottom).
+| Group | Fields |
+|---|---|
+| Size | width, height, min/max width and height (auto layout or its children) |
+| Auto layout | gap, wrap gap, grid row/column gap, padding per side |
+| Corner radius | all corners, each corner |
+| Fill | solid color, gradient stop colors |
+| Stroke | solid color, gradient stop colors, weight (all sides or each side) |
+| Effects | shadow X, Y, blur, spread, color; layer/background blur radius |
+| More | opacity, visibility, layout grid count/size/gutter/offset |
 
-Open console (`⌘⌥I` › Console) to see logs and errors.
+Not bindable through the API: corner smoothing, progressive blur start radius and offsets, image/video/pattern paints, noise/texture/glass effects.
 
-### Remember to update
+## Behaviour and edge cases
 
-There are some places where you'd want to fill in your plugin specific data like name and stuff:
+- **Multiple layers:** only fields shared by every selected layer are shown. Differing values show *Mixed*. Fills, strokes, effects and grids must have the same structure (count, types and order) on every layer, or the group shows a notice and binding is turned off.
+- **Styles:** a group with a style applied shows the style chip with a *Detach style* button instead of the fields. Bindings never detach styles silently.
+- **Instances:** binding inside an instance creates an override; the plugin shows *Overriding the instance*. Selecting a component set binds the set itself, not its variants.
+- **Large selections:** values are read from the first 50 layers. Bindings still go to all of them, in chunks so Figma stays responsive.
+- **Failures** (type mismatch, removed layers, fields that don't apply) are reported per layer in the notification. Details are logged in the console.
+
+## Performance notes
+
+- Library collections are listed instantly from cache, then refreshed in the background (the Figma call takes about 2 s).
+- A collection's variables load only when you open it. Library variables arrive without scopes or values, so Forcer imports them in the background, 8 at a time (about 3–6 s for 90 variables), and caches scopes and previews for 12 hours.
+- Switching collections cancels the background import. Reopening resumes it.
+
+## Development
+
 ```
-assets/
-  ├── cover.png         # Add your icon
-  └── icon.png          # Add your cover
+npm i
+npm run dev      # watch both bundles
+npm run build    # production build
+npm run check    # tsc + svelte-check
+```
+
+In Figma desktop: Actions `⌘K` › Plugins & Widgets › Import from manifest › `manifest.json`. Open the console with `⌘⌥I`.
+
+### Structure
+
+```
 src/
-  └── config.ts         # Edit messages
-readme.md               # Remove this guide and make a really cool description
-manifest.json           # Edit name, add generated ID on publish
-package.json            # Edit name, version, description, author, license
+  shared/types.ts      # message protocol and shared types
+  code/                # main thread (Figma sandbox), built to dist/code/code.js
+    main.ts            # entry: UI, selection tracking, message routing
+    selection.ts       # analyses the selection into groups of fields
+    fields.ts          # field addressing, read/write of a single field
+    apply.ts           # bind/unbind/detach style across the selection
+    catalog.ts         # collections, lazy variable loading, import cache
+    storage.ts         # fail-safe clientStorage wrappers
+  ui/                  # Svelte 5 UI, inlined into one HTML file (dist/ui/index.html)
 ```
 
-### Project structure
+The UI must be a single inlined HTML file because Figma loads it from the `__html__` string, so `vite-plugin-singlefile` is required.
 
-```
-assets/
-  ├── cover.png         # Plugin cover (used in readme, you will need it on publish)
-  └── icon.png          # Plugin icon (used in readme, you will need it on publish)
-src/
-  ├── pages/            
-  │   └── index.astro   # Main plugin UI
-  ├── components/       # Reusable Astro components
-  ├── code.ts           # Main plugin logic
-  ├── config.ts         # Your config and constants
-  └── helpers/          # Shared helpers and utilities
-readme.md               # Description 
-manifest.json           # Plugin name and configuration
-package.json            # NPM package info
+## Feedback
 
-```
-You probably won't need other files, it's mostly configuration files, demos and helpers. 
-
-
-### Development workflow
-- **`npm run dev`** - Watches `src/` and rebuilds `dist/` on changes
-- **`npm run build`** - Builds both plugin code and UI for production
-
----
-
-## **Template for your plugin readme**
-
-# Plugin name for Figma
-
-Plugin description
-
-![<Plugin name cover>](assets/cover.png)
-
-### How to use
-
-**Just run it** from the Quick Actions or Plugin menu. 
-
-Alternatively, select layers and the plugin will `<do this>`.
-
-### How it works
-
-`<Explain the approach>`
-Plugin will do `<things>` with selected layers.
-
-### Feedback
-
-I accept feature suggestions and ideas to improve the plugin. If you have any ideas or issues, let me know in the comments.
-
-Or contact me via e-mail at [nick@qurle.net](mailto:nick@qurle.net?subject=<Plugin%20for%Figma>) or [Telegram](http://t.me/qurle).
-
-# <3
+Contact me via e-mail at [nick@qurle.net](mailto:nick@qurle.net?subject=Forcer%20for%20Figma) or [Telegram](http://t.me/qurle).
